@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automata Lab: learn a DFA from examples</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ left rail: data + learner controls ============ -->
+  <aside class="rail">
+    <header class="brand">
+      <h1>Automata Lab</h1>
+      <p>Give it labeled strings. It infers a finite automaton you can draw, test and compare.</p>
+    </header>
+
+    <section class="block">
+      <h2>Language</h2>
+      <label class="field">
+        <span>Reference language</span>
+        <select id="language"></select>
+      </label>
+      <p id="langDesc" class="hint"></p>
+      <label class="field" id="alphaField" hidden>
+        <span>Alphabet (leave empty to detect it from your examples)</span>
+        <input id="alphabet" type="text" value="" placeholder="e.g. 01 or ab" spellcheck="false" autocomplete="off">
+      </label>
+    </section>
+
+    <section class="block">
+      <h2>Training examples</h2>
+      <div class="row3">
+        <label class="field"><span>Count</span><input id="genN" type="number" min="4" max="3000" value="40"></label>
+        <label class="field"><span>Max length</span><input id="genLen" type="number" min="1" max="14" value="8"></label>
+        <label class="field"><span>Label noise %</span><input id="genNoise" type="number" min="0" max="50" value="0"></label>
+      </div>
+      <label class="check"><input id="genBalance" type="checkbox" checked> Balance accepted and rejected</label>
+      <button id="btnGenerate" class="btn ghost">Generate examples</button>
+      <label class="field">
+        <span>One per line: string, then + (accept) or − (reject). Write ε for the empty string.</span>
+        <textarea id="examples" rows="9" spellcheck="false" placeholder="0101 +&#10;110 -&#10;ε -"></textarea>
+      </label>
+      <p id="exSummary" class="hint"></p>
+    </section>
+
+    <section class="block">
+      <h2>Learning method</h2>
+      <label class="field">
+        <select id="algorithm">
+          <option value="rpni">RPNI: learn from the examples above</option>
+          <option value="lstar">L*: ask the reference language questions</option>
+        </select>
+      </label>
+      <p id="algoHint" class="hint"></p>
+      <button id="btnLearn" class="btn primary">Learn automaton</button>
+      <p id="learnError" class="error" role="alert" hidden></p>
+    </section>
+  </aside>
+
+  <!-- ============ main area ============ -->
+  <main class="main">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="learn" role="tab">Learn and test</button>
+      <button class="tab" data-tab="experiments" role="tab">Experiments</button>
+      <button class="tab" data-tab="clusters" role="tab">Clusters</button>
+      <button class="tab" data-tab="nfa" role="tab">NFA to DFA</button>
+    </nav>
+
+    <!-- ---------------- Learn and test ---------------- -->
+    <section class="panel active" id="tab-learn">
+      <div class="stage">
+        <div class="stage-bar">
+          <div class="seg" id="viewSeg">
+            <button data-view="learned" class="on">Learned DFA</button>
+            <button data-view="reference">Reference DFA</button>
+            <button data-view="nfa" id="viewNfaBtn" hidden>Reference NFA</button>
+          </div>
+          <label class="check small"><input id="showDead" type="checkbox"> Show dead state</label>
+        </div>
+        <div id="graphMain" class="canvas"></div>
+        <p id="graphEmpty" class="empty">Generate some examples and press Learn automaton to draw the machine.</p>
+      </div>
+
+      <div id="verdict" class="verdict" hidden></div>
+
+      <dl id="metrics" class="metrics" hidden></dl>
+
+      <div class="tester">
+        <h2>Test a string</h2>
+        <div class="tester-row">
+          <input id="testStr" type="text" placeholder="Type a string, e.g. 10110" spellcheck="false" autocomplete="off">
+          <button id="btnRun" class="btn primary">Run on learned DFA</button>
+        </div>
+        <p id="runError" class="error" role="alert" hidden></p>
+        <div id="runOut" hidden>
+          <div class="trace" id="trace"></div>
+          <div class="stepper">
+            <button id="stepBack" class="btn ghost small">Back</button>
+            <button id="stepNext" class="btn ghost small">Next</button>
+            <button id="stepPlay" class="btn ghost small">Play</button>
+            <span id="runResult" class="result"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- Experiments ---------------- -->
+    <section class="panel" id="tab-experiments">
+      <div class="lead">
+        <h2>How much data does the learner need, and how much noise can it take?</h2>
+        <p>Each point averages several random training sets (RPNI, labels from the reference language, tested on strings it never saw, including strings longer than any it was trained on).</p>
+      </div>
+      <div class="controls">
+        <label class="field inline"><span>Trials per point</span><input id="expTrials" type="number" min="1" max="15" value="6"></label>
+        <label class="field inline"><span>Examples for the noise test</span><input id="expNoiseN" type="number" min="10" max="400" value="100"></label>
+        <button id="btnExp" class="btn primary">Run experiment</button>
+      </div>
+      <p id="expError" class="error" role="alert" hidden></p>
+      <div class="charts">
+        <figure><figcaption>More examples</figcaption><div class="chartbox"><canvas id="chartSize"></canvas></div><p id="noteSize" class="note"></p></figure>
+        <figure><figcaption>Noisy labels</figcaption><div class="chartbox"><canvas id="chartNoise"></canvas></div><p id="noteNoise" class="note"></p></figure>
+      </div>
+    </section>
+
+    <!-- ---------------- Clusters ---------------- -->
+    <section class="panel" id="tab-clusters">
+      <div class="lead">
+        <h2>Do the strings group by themselves?</h2>
+        <p>Each string becomes a feature vector (length, symbol counts, bigram counts, first and last symbol). K-means groups them and PCA flattens the result to two dimensions. Circles are accepted strings, triangles are rejected. If a cluster is mostly one label, the features alone hint at the language.</p>
+      </div>
+      <div class="controls">
+        <label class="field inline"><span>Clusters (k)</span><input id="clusterK" type="number" min="2" max="8" value="2"></label>
+        <button id="btnCluster" class="btn primary">Cluster current examples</button>
+      </div>
+      <p id="clusterError" class="error" role="alert" hidden></p>
+      <div class="cluster-wrap">
+        <div class="chartbox tall"><canvas id="chartCluster"></canvas></div>
+        <table id="clusterTable" class="table" hidden></table>
+      </div>
+    </section>
+
+    <!-- ---------------- NFA to DFA ---------------- -->
+    <section class="panel" id="tab-nfa">
+      <div class="lead">
+        <h2>Write an NFA and watch it become a DFA</h2>
+        <p>Subset construction builds the DFA one set of NFA states at a time. Minimization then removes states that behave the same.</p>
+      </div>
+      <div class="nfa-grid">
+        <div>
+          <label class="field">
+            <span>NFA definition</span>
+            <textarea id="nfaText" rows="12" spellcheck="false"></textarea>
+          </label>
+          <label class="field">
+            <span>Strings to compare (comma separated)</span>
+            <input id="nfaTests" type="text" value="100, 000, 0110, 111, 011">
+          </label>
+          <button id="btnNfa" class="btn primary">Convert to DFA</button>
+          <p id="nfaError" class="error" role="alert" hidden></p>
+          <p id="nfaSummary" class="hint"></p>
+        </div>
+        <div class="nfa-graphs">
+          <figure><figcaption>NFA</figcaption><div id="graphNfa" class="canvas small"></div></figure>
+          <figure><figcaption>Equivalent minimal DFA</figcaption><div id="graphNfaDfa" class="canvas small"></div></figure>
+        </div>
+      </div>
+      <table id="subsetTable" class="table" hidden></table>
+      <table id="nfaTestTable" class="table" hidden></table>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>
