@@ -334,6 +334,7 @@ async function generate() {
 function resetOutputs() {
   $("#verdict").hidden = true; $("#metrics").hidden = true; $("#runOut").hidden = true;
   $("#graphEmpty").hidden = false;
+  if ($("#dfaTableWrap")) $("#dfaTableWrap").hidden = true;
   if (mainGraph.net) { mainGraph.net.destroy(); mainGraph.net = null; }
   stopPlay();
 }
@@ -359,6 +360,7 @@ async function learn() {
     setView("learned");
     renderVerdict(res);
     renderMetrics(res);
+    renderDfaTable();
     $("#runOut").hidden = true; stopPlay();
     $("#btnRun").textContent = "Run on learned DFA";
   } catch (e) { showError("#learnError", e.message); }
@@ -409,6 +411,47 @@ function renderMetrics(res) {
   const el = $("#metrics");
   el.hidden = false;
   el.innerHTML = items.map(([k, v, s]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}<small>${esc(s)}</small></dd></div>`).join("");
+}
+
+function renderDfaTable() {
+  const wrap = $("#dfaTableWrap");
+  if (!state.learned || !state.learned.dfa) {
+    if (wrap) wrap.hidden = true;
+    return;
+  }
+  const dfa = state.learned.dfa;
+  const transMap = new Map();
+  (dfa.transitions || []).forEach(([from, sym, to]) => {
+    transMap.set(`${from}:${sym}`, to);
+  });
+  const alphabet = dfa.alphabet || [];
+  const states = dfa.states || [];
+  const acceptingSet = new Set(dfa.accepting || []);
+
+  let html = `<thead><tr><th>State (δ)</th>${alphabet.map((a) => `<th>on <code>${esc(a)}</code></th>`).join("")}</tr></thead><tbody>`;
+
+  states.forEach((s) => {
+    const isStart = s === dfa.start;
+    const isAcc = acceptingSet.has(s);
+    let marker = "";
+    if (isStart && isAcc) marker = "→ *";
+    else if (isStart) marker = "→";
+    else if (isAcc) marker = "*";
+
+    html += `<tr data-state="${s}">`;
+    html += `<td class="mono"><span class="marker">${marker}</span>q${s}</td>`;
+    alphabet.forEach((a) => {
+      const to = transMap.get(`${s}:${a}`);
+      const toStr = to !== undefined ? `q${to}` : "–";
+      html += `<td class="mono">${toStr}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody>`;
+  const table = $("#dfaTable");
+  if (table) table.innerHTML = html;
+  if (wrap) wrap.hidden = false;
 }
 
 /* ------------------------------------------------------------------ *
@@ -499,6 +542,12 @@ function paintStep() {
   }
   $("#stepBack").disabled = state.k === 0;
   $("#stepNext").disabled = final;
+
+  // Highlight current state in the transition table
+  const curStateId = state.nodeSeq[state.k];
+  $$("#dfaTable tr[data-state]").forEach((row) => {
+    row.classList.toggle("current-row", row.dataset.state == curStateId);
+  });
 }
 
 function step(d) {
@@ -680,6 +729,51 @@ async function runNfa() {
   finally { setBtnLoading(btn, false, "Convert to DFA"); }
 }
 
+let relayoutTimer = null;
+function relayoutGraph() {
+  if (!mainGraph.net) return;
+  if (relayoutTimer) clearTimeout(relayoutTimer);
+  mainGraph.net.setOptions({ physics: true });
+  relayoutTimer = setTimeout(() => {
+    if (mainGraph.net) {
+      mainGraph.net.setOptions({ physics: false });
+      mainGraph.net.fit({ animation: true });
+    }
+  }, 2000);
+}
+
+function fitGraph() {
+  if (mainGraph.net) mainGraph.net.fit({ animation: true });
+}
+
+function saveGraphPng() {
+  const canvas = $("#graphMain canvas");
+  if (!canvas) return;
+  const off = document.createElement("canvas");
+  off.width = canvas.width;
+  off.height = canvas.height;
+  const ctx = off.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, off.width, off.height);
+  ctx.drawImage(canvas, 0, 0);
+
+  const a = document.createElement("a");
+  a.href = off.toDataURL("image/png");
+  a.download = (state.view || "dfa") + ".png";
+  a.click();
+}
+
+function downloadDfaJson() {
+  if (!state.learned || !state.learned.dfa) return;
+  const blob = new Blob([JSON.stringify(state.learned.dfa, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (state.lang && state.lang !== "custom" ? state.lang : "learned") + "_dfa.json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /* ------------------------------------------------------------------ *
  *  Wiring
  * ------------------------------------------------------------------ */
@@ -691,6 +785,10 @@ $$(".tab").forEach((t) => t.addEventListener("click", () => {
 }));
 $$("#viewSeg button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 $("#showDead").addEventListener("change", drawMain);
+$("#btnRelayout").addEventListener("click", relayoutGraph);
+$("#btnFit").addEventListener("click", fitGraph);
+$("#btnSavePng").addEventListener("click", saveGraphPng);
+$("#btnDlJson").addEventListener("click", downloadDfaJson);
 $("#btnGenerate").addEventListener("click", generate);
 $("#btnLearn").addEventListener("click", learn);
 $("#algorithm").addEventListener("change", updateAlgoHint);

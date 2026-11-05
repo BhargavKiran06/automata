@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <div class="app">
@@ -80,7 +80,12 @@
             <button data-view="reference">Reference DFA</button>
             <button data-view="nfa" id="viewNfaBtn" hidden>Reference NFA</button>
           </div>
-          <label class="check small"><input id="showDead" type="checkbox"> Show dead state</label>
+          <div class="stage-actions">
+            <label class="check small"><input id="showDead" type="checkbox"> Show dead state</label>
+            <button id="btnRelayout" class="btn ghost small" title="Re-enable physics for 2 seconds to untangle nodes">Re-layout</button>
+            <button id="btnFit" class="btn ghost small" title="Fit graph to view">Fit</button>
+            <button id="btnSavePng" class="btn ghost small" title="Download graph image">Save PNG</button>
+          </div>
         </div>
         <div class="stage-legend">
           <span>arrow = start state</span>
@@ -90,6 +95,15 @@
         </div>
         <div id="graphMain" class="canvas"></div>
         <p id="graphEmpty" class="empty">Generate some examples and press Learn automaton to draw the machine.</p>
+      </div>
+
+      <!-- Transition table (δ) -->
+      <div id="dfaTableWrap" class="table-wrap" hidden>
+        <div class="table-header">
+          <h3>Transition table (&delta;)</h3>
+          <button id="btnDlJson" class="btn ghost small">Download DFA as JSON</button>
+        </div>
+        <table id="dfaTable" class="table"></table>
       </div>
 
       <div class="tester">
@@ -200,6 +214,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>
