@@ -22,6 +22,18 @@ function showError(id, msg) {
   el.hidden = !msg;
 }
 
+function setBtnLoading(btn, loading, defaultText) {
+  if (!btn) return;
+  if (loading) {
+    if (!btn.dataset.origText) btn.dataset.origText = btn.textContent.trim();
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner" aria-hidden="true"></span>Running…`;
+  } else {
+    btn.disabled = false;
+    btn.textContent = defaultText || btn.dataset.origText || "Submit";
+  }
+}
+
 const pct = (x) => (x == null ? "n/a" : (x * 100).toFixed(1) + "%");
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const show = (s) => (s === "" ? "ε" : s);
@@ -91,7 +103,7 @@ class Graph {
       id: `${e.from}>${e.to}`, from: e.from, to: e.to, label: e.label, symbols: e.symbols,
       arrows: { to: { enabled: true, scaleFactor: 0.8 } },
       color: { color: EDGE_IDLE, highlight: EDGE_IDLE }, width: 1.8,
-      font: { size: 15, face: "JetBrains Mono", color: "#15232D", strokeWidth: 5, strokeColor: "#ffffff", align: "middle" },
+      font: { size: 15, face: "JetBrains Mono", color: "#15232D", strokeWidth: 5, strokeColor: "#ffffff", align: "horizontal" },
       smooth: e.from === e.to ? false : { enabled: true, type: "curvedCW", roundness: 0.22 },
     }));
     this.edges = new vis.DataSet(edges);
@@ -254,6 +266,18 @@ async function onLanguage(key, clearExamples) {
   if (custom) {
     $("#alphabet").value = "";   // clear any stale / browser-restored value
   }
+  const refBtn = $('#viewSeg button[data-view="reference"]');
+  if (refBtn) refBtn.hidden = custom;
+  if (custom && state.view === "reference") {
+    setView("learned");
+  }
+  const expBtn = $("#btnExp");
+  if (expBtn) expBtn.disabled = custom;
+  if (custom) {
+    showError("#expError", "Experiments need a preset language as ground truth.");
+  } else {
+    showError("#expError", "");
+  }
   const info = state.languages.find((l) => l.key === key);
   $("#langDesc").textContent = custom
     ? "Type your own alphabet and labeled strings. There is no reference to compare against."
@@ -293,7 +317,8 @@ function updateAlgoHint() {
 async function generate() {
   if (state.lang === "custom") { showError("#learnError", "Pick a preset language to auto-generate examples, or type your own."); return; }
   showError("#learnError", "");
-  const btn = $("#btnGenerate"); btn.disabled = true;
+  const btn = $("#btnGenerate");
+  setBtnLoading(btn, true);
   try {
     const r = await api("/generate", {
       language: state.lang,
@@ -303,7 +328,7 @@ async function generate() {
     $("#examples").value = formatExamples(r.examples);
     updateSummary();
   } catch (e) { showError("#learnError", e.message); }
-  btn.disabled = false;
+  finally { setBtnLoading(btn, false, "Generate examples"); }
 }
 
 function resetOutputs() {
@@ -322,7 +347,8 @@ async function learn() {
   if (errors.length) { showError("#learnError", errors[0]); return; }
   if (algorithm === "rpni" && !rows.length) { showError("#learnError", "Add some labeled examples first."); return; }
   const maxLen = rows.length ? Math.max(1, ...rows.map((r) => r.s.length)) : +$("#genLen").value;
-  const btn = $("#btnLearn"); btn.disabled = true; btn.textContent = "Learning...";
+  const btn = $("#btnLearn");
+  setBtnLoading(btn, true);
   try {
     const res = await api("/learn", {
       alphabet, examples: rows, algorithm,
@@ -336,7 +362,7 @@ async function learn() {
     $("#runOut").hidden = true; stopPlay();
     $("#btnRun").textContent = "Run on learned DFA";
   } catch (e) { showError("#learnError", e.message); }
-  btn.disabled = false; btn.textContent = "Learn automaton";
+  finally { setBtnLoading(btn, false, "Learn automaton"); }
 }
 
 function renderVerdict(res) {
@@ -425,6 +451,8 @@ async function runTest() {
   if (!state.learned) { showError("#runError", "Learn an automaton first."); return; }
   const s = $("#testStr").value.replace(/ε/g, "").trim();
   stopPlay();
+  const btn = $("#btnRun");
+  setBtnLoading(btn, true);
   try {
     const r = await api("/run", {
       kind: "dfa", automaton: state.learned.dfa, string: s,
@@ -441,6 +469,7 @@ async function runTest() {
     $("#runOut").hidden = false;
     paintStep();
   } catch (e) { showError("#runError", e.message); }
+  finally { setBtnLoading(btn, false, "Run on learned DFA"); }
 }
 
 function paintStep() {
@@ -522,13 +551,18 @@ function lineChart(id, labels, accuracy, states, refStates, xTitle) {
 async function runExperiment() {
   showError("#expError", "");
   if (state.lang === "custom") { showError("#expError", "Experiments need a preset language as ground truth."); return; }
-  const btn = $("#btnExp"); btn.disabled = true; btn.textContent = "Running...";
+  const btn = $("#btnExp");
+  setBtnLoading(btn, true);
   try {
     const r = await api("/experiment", {
       language: state.lang, trials: +$("#expTrials").value, noise_size: +$("#expNoiseN").value,
       max_len: +$("#genLen").value,
     });
     const sc = r.size_curve, nc = r.noise_curve;
+    if ($("#emptySize")) $("#emptySize").hidden = true;
+    if ($("#chartSize")) $("#chartSize").hidden = false;
+    if ($("#emptyNoise")) $("#emptyNoise").hidden = true;
+    if ($("#chartNoise")) $("#chartNoise").hidden = false;
     lineChart("chartSize", sc.map((p) => p.x), sc.map((p) => p.accuracy), sc.map((p) => p.states), r.ref_states, "Training examples");
     lineChart("chartNoise", nc.map((p) => Math.round(p.x * 100) + "%"), nc.map((p) => p.accuracy), nc.map((p) => p.states), r.ref_states, `Labels flipped (${r.noise_size} examples)`);
     const firstExact = sc.find((p) => p.exact_rate >= 0.8);
@@ -539,7 +573,7 @@ async function runExperiment() {
     $("#noteNoise").textContent =
       `With clean labels the learner averages ${clean.states.toFixed(1)} states; at ${Math.round(worst.x * 100)}% noise it averages ${worst.states.toFixed(1)} and accuracy drops to ${pct(worst.accuracy)}. RPNI must fit every label, so noise forces extra states.`;
   } catch (e) { showError("#expError", e.message); }
-  btn.disabled = false; btn.textContent = "Run experiment";
+  finally { setBtnLoading(btn, false, "Run experiment"); }
 }
 
 /* ------------------------------------------------------------------ *
@@ -550,6 +584,8 @@ async function runCluster() {
   const alphabet = currentAlphabet();
   const { rows, errors } = parseExamples($("#examples").value, alphabet);
   if (errors.length) { showError("#clusterError", errors[0]); return; }
+  const btn = $("#btnCluster");
+  setBtnLoading(btn, true);
   try {
     const r = await api("/cluster", { alphabet, examples: rows, k: +$("#clusterK").value });
     const colors = ["#0E6B8C", "#E8A10C", "#7A4FB5", "#1B8A5A", "#C4432B", "#4B5D69", "#C06A9B", "#6B8E23"];
@@ -568,6 +604,8 @@ async function runCluster() {
       });
     }
     if (state.charts.cluster) state.charts.cluster.destroy();
+    if ($("#emptyCluster")) $("#emptyCluster").hidden = true;
+    if ($("#chartCluster")) $("#chartCluster").hidden = false;
     state.charts.cluster = new Chart($("#chartCluster"), {
       type: "scatter", data: { datasets: sets },
       options: {
@@ -584,6 +622,7 @@ async function runCluster() {
     t.innerHTML = `<tr><th>Cluster</th><th>Strings</th><th>Accepted</th><th>Rejected</th><th>Avg length</th></tr>` +
       r.summary.map((s) => `<tr><td>${s.cluster + 1}</td><td class="mono">${s.size}</td><td class="mono">${s.accepted}</td><td class="mono">${s.rejected}</td><td class="mono">${s.avg_len.toFixed(1)}</td></tr>`).join("");
   } catch (e) { showError("#clusterError", e.message); }
+  finally { setBtnLoading(btn, false, "Cluster current examples"); }
 }
 
 /* ------------------------------------------------------------------ *
@@ -610,7 +649,7 @@ function parseNfa(text) {
     if ((m = line.match(/^alphabet\s*:\s*(.+)$/i))) out.alphabet = m[1].split(/[\s,]+/).filter(Boolean);
     else if ((m = line.match(/^start\s*:\s*(.+)$/i))) out.start = num(m[1].trim());
     else if ((m = line.match(/^accept(?:ing)?\s*:\s*(.+)$/i))) out.accepting = m[1].split(/[\s,]+/).filter(Boolean).map(num);
-    else if ((m = line.match(/^(\S+)\s+(\S+)\s*->\s*(.+)$/))) {
+    else if ((m = line.match(/^(\S+)\s+(\S+)\s*(?:->|→)\s*(.+)$/))) {
       out.transitions.push([num(m[1]), m[2], m[3].split(/[\s,]+/).filter(Boolean).map(num)]);
     } else throw new Error(`Cannot read line: "${line}"`);
   });
@@ -620,6 +659,8 @@ function parseNfa(text) {
 
 async function runNfa() {
   showError("#nfaError", "");
+  const btn = $("#btnNfa");
+  setBtnLoading(btn, true);
   try {
     const nfa = parseNfa($("#nfaText").value);
     nfa.test_strings = $("#nfaTests").value.split(",").map((s) => s.trim()).filter((s) => s.length).map((s) => (s === "ε" ? "" : s));
@@ -636,6 +677,7 @@ async function runNfa() {
     tt.innerHTML = `<tr><th>String</th><th>NFA</th><th>Minimal DFA</th></tr>` +
       r.tests.map((t) => `<tr><td class="mono">${esc(show(t.s))}</td><td class="${t.nfa ? "yes" : "no"}">${t.nfa ? "accepts" : "rejects"}</td><td class="${t.dfa ? "yes" : "no"}">${t.dfa ? "accepts" : "rejects"}</td></tr>`).join("");
   } catch (e) { showError("#nfaError", e.message); }
+  finally { setBtnLoading(btn, false, "Convert to DFA"); }
 }
 
 /* ------------------------------------------------------------------ *

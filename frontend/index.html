@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="app">
@@ -52,8 +52,8 @@
       <h2>Learning method</h2>
       <label class="field">
         <select id="algorithm">
-          <option value="rpni">RPNI: learn from the examples above</option>
-          <option value="lstar">L*: ask the reference language questions</option>
+          <option value="rpni">RPNI (learn from examples)</option>
+          <option value="lstar">L* (ask the reference language)</option>
         </select>
       </label>
       <p id="algoHint" class="hint"></p>
@@ -82,13 +82,15 @@
           </div>
           <label class="check small"><input id="showDead" type="checkbox"> Show dead state</label>
         </div>
+        <div class="stage-legend">
+          <span>arrow = start state</span>
+          <span>double circle = accepting state</span>
+          <span>dashed circle = dead state</span>
+          <span>amber arrows = the path of the tested string</span>
+        </div>
         <div id="graphMain" class="canvas"></div>
         <p id="graphEmpty" class="empty">Generate some examples and press Learn automaton to draw the machine.</p>
       </div>
-
-      <div id="verdict" class="verdict" hidden></div>
-
-      <dl id="metrics" class="metrics" hidden></dl>
 
       <div class="tester">
         <h2>Test a string</h2>
@@ -107,6 +109,10 @@
           </div>
         </div>
       </div>
+
+      <div id="verdict" class="verdict" hidden></div>
+
+      <dl id="metrics" class="metrics" hidden></dl>
     </section>
 
     <!-- ---------------- Experiments ---------------- -->
@@ -122,8 +128,22 @@
       </div>
       <p id="expError" class="error" role="alert" hidden></p>
       <div class="charts">
-        <figure><figcaption>More examples</figcaption><div class="chartbox"><canvas id="chartSize"></canvas></div><p id="noteSize" class="note"></p></figure>
-        <figure><figcaption>Noisy labels</figcaption><div class="chartbox"><canvas id="chartNoise"></canvas></div><p id="noteNoise" class="note"></p></figure>
+        <figure>
+          <figcaption>More examples</figcaption>
+          <div class="chartbox">
+            <p id="emptySize" class="empty-chart">Run the experiment to see accuracy and state count against the number of examples</p>
+            <canvas id="chartSize" hidden></canvas>
+          </div>
+          <p id="noteSize" class="note"></p>
+        </figure>
+        <figure>
+          <figcaption>Noisy labels</figcaption>
+          <div class="chartbox">
+            <p id="emptyNoise" class="empty-chart">Run the experiment to see accuracy and state count against the number of examples</p>
+            <canvas id="chartNoise" hidden></canvas>
+          </div>
+          <p id="noteNoise" class="note"></p>
+        </figure>
       </div>
     </section>
 
@@ -139,7 +159,10 @@
       </div>
       <p id="clusterError" class="error" role="alert" hidden></p>
       <div class="cluster-wrap">
-        <div class="chartbox tall"><canvas id="chartCluster"></canvas></div>
+        <div class="chartbox tall">
+          <p id="emptyCluster" class="empty-chart">Cluster current examples to visualize groupings in 2D space.</p>
+          <canvas id="chartCluster" hidden></canvas>
+        </div>
         <table id="clusterTable" class="table" hidden></table>
       </div>
     </section>
@@ -177,6 +200,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>
