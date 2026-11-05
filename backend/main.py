@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from automata import DFA, NFA
 from generator import PRESETS, generate_examples, reference, test_set
-from learning import clean_samples, lstar, rpni
+from learning import clean_samples, edsm, lstar, rpni
 
 app = FastAPI(title="Automata Lab")
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -41,7 +41,8 @@ class GenerateReq(BaseModel):
 class LearnReq(BaseModel):
     alphabet: List[str]
     examples: List[Example] = []
-    algorithm: str = "rpni"              # "rpni" | "lstar"
+    algorithm: str = "rpni"              # "rpni" | "edsm" | "lstar"
+    noise: float = Field(0.0, ge=0, le=0.45)   # expected label noise (fraction), used by edsm
     reference: Optional[str] = None      # preset key; needed for L* and for comparison
     test_max_len: int = 8
 
@@ -147,6 +148,8 @@ def learn(req: LearnReq):
             raise HTTPException(400, f"String '{s}' uses symbols outside the alphabet.")
 
     t0 = time.perf_counter()
+    if req.algorithm not in ("rpni", "edsm", "lstar"):
+        raise HTTPException(400, "Unknown algorithm.")
     if req.algorithm == "lstar":
         if ref is None:
             raise HTTPException(400, "L* needs a teacher: pick a reference language.")
@@ -155,7 +158,10 @@ def learn(req: LearnReq):
     else:
         if len(examples) < 1:
             raise HTTPException(400, "Add at least one labeled example.")
-        dfa, info = rpni(examples, alphabet)
+        if req.algorithm == "edsm":
+            dfa, info = edsm(examples, alphabet, noise=req.noise)
+        else:
+            dfa, info = rpni(examples, alphabet)
         train = {s for s, _ in clean_samples(examples)[0]}
     elapsed = (time.perf_counter() - t0) * 1000
 
@@ -239,9 +245,12 @@ def experiment(req: ExperimentReq):
     alphabet = PRESETS[req.language]["alphabet"]
     ref_states = len([s for s in ref.minimized().states if s not in ref.minimized().sink_states()])
 
-    def trial(n: int, noise: float, seed: int):
+    def trial(n: int, noise: float, seed: int, algo: str = "rpni"):
         data = generate_examples(ref, n, req.max_len, True, noise, seed)
-        dfa, _ = rpni(data, alphabet)
+        if algo == "edsm":
+            dfa, _ = edsm(data, alphabet, noise=noise)   # assumes the noise level is known
+        else:
+            dfa, _ = rpni(data, alphabet)
         mini = dfa.minimized()
         # test on strings the learner has not seen; labels come from the clean reference
         m = _evaluate(mini, ref, {s for s, _ in data}, req.max_len, 800)
@@ -263,6 +272,8 @@ def experiment(req: ExperimentReq):
     return {"language": req.language, "ref_states": ref_states,
             "size_curve": curve(sizes, lambda n, seed: trial(n, 0.0, seed)),
             "noise_curve": curve(noises, lambda z, seed: trial(req.noise_size, z, seed)),
+            "size_curve_edsm": curve(sizes, lambda n, seed: trial(n, 0.0, seed, "edsm")),
+            "noise_curve_edsm": curve(noises, lambda z, seed: trial(req.noise_size, z, seed, "edsm")),
             "noise_size": req.noise_size, "trials": req.trials}
 
 

@@ -6,8 +6,8 @@
 <title>Automata Lab: learn a DFA from examples</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=5">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400;1,6..72,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
 <div class="app">
@@ -16,7 +16,7 @@
   <aside class="rail">
     <header class="brand">
       <h1>Automata Lab</h1>
-      <p>Give it labeled strings. It infers a finite automaton you can draw, test and compare.</p>
+      <p>Learn a DFA from labeled strings. Draw it, test it, compare it.</p>
     </header>
 
     <section class="block">
@@ -27,13 +27,13 @@
       </label>
       <p id="langDesc" class="hint"></p>
       <label class="field" id="alphaField" hidden>
-        <span>Alphabet (leave empty to detect it from your examples)</span>
+        <span>Alphabet (leave empty to detect from examples)</span>
         <input id="alphabet" type="text" value="" placeholder="e.g. 01 or ab" spellcheck="false" autocomplete="off">
       </label>
     </section>
 
     <section class="block">
-      <h2>Training examples</h2>
+      <h2>Examples</h2>
       <div class="row3">
         <label class="field"><span>Count</span><input id="genN" type="number" min="4" max="3000" value="40"></label>
         <label class="field"><span>Max length</span><input id="genLen" type="number" min="1" max="14" value="8"></label>
@@ -49,7 +49,7 @@
     </section>
 
     <section class="block">
-      <h2>Learning method</h2>
+      <h2>Method</h2>
       <label class="field">
         <select id="algorithm">
           <option value="rpni">RPNI (learn from examples)</option>
@@ -94,7 +94,8 @@
           <span>amber arrows = the path of the tested string</span>
         </div>
         <div id="graphMain" class="canvas"></div>
-        <p id="graphEmpty" class="empty">Generate some examples and press Learn automaton to draw the machine.</p>
+        <p id="figCaption" class="caption"></p>
+        <p id="graphEmpty" class="empty">Provide examples and select Learn automaton to display the machine.</p>
       </div>
 
       <!-- Transition table (δ) -->
@@ -202,8 +203,8 @@
           <p id="nfaSummary" class="hint"></p>
         </div>
         <div class="nfa-graphs">
-          <figure><figcaption>NFA</figcaption><div id="graphNfa" class="canvas small"></div></figure>
-          <figure><figcaption>Equivalent minimal DFA</figcaption><div id="graphNfaDfa" class="canvas small"></div></figure>
+          <figure><figcaption>NFA</figcaption><div id="graphNfa" class="canvas small"></div><p id="figNfaCaption" class="caption"></p></figure>
+          <figure><figcaption>Equivalent minimal DFA</figcaption><div id="graphNfaDfa" class="canvas small"></div><p id="figNfaDfaCaption" class="caption"></p></figure>
         </div>
       </div>
       <table id="subsetTable" class="table" hidden></table>
@@ -214,6 +215,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

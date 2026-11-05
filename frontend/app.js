@@ -38,18 +38,28 @@ const pct = (x) => (x == null ? "n/a" : (x * 100).toFixed(1) + "%");
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const show = (s) => (s === "" ? "ε" : s);
 
+const SUBSCRIPTS = { '0':'₀', '1':'₁', '2':'₂', '3':'₃', '4':'₄', '5':'₅', '6':'₆', '7':'₇', '8':'₈', '9':'₉' };
+const toSubscript = (n) => String(n).split('').map((c) => SUBSCRIPTS[c] || c).join('');
+const formatStateLabel = (label) => {
+  const s = String(label);
+  const m = s.match(/^([a-zA-Z]+)(\d+)$/);
+  if (m) return `${m[1]}${toSubscript(m[2])}`;
+  if (/^\d+$/.test(s)) return `q${toSubscript(s)}`;
+  return s;
+};
+
 /* ------------------------------------------------------------------ *
  *  Graph drawing (vis-network with a custom renderer for double circles)
  * ------------------------------------------------------------------ */
 const PAL = {
-  idle:    { fill: "#FFFFFF", stroke: "#0E6B8C", text: "#15232D" },
-  visited: { fill: "#FCEFCF", stroke: "#E8A10C", text: "#15232D" },
-  current: { fill: "#E8A10C", stroke: "#B97F00", text: "#15232D" },
-  accept:  { fill: "#1B8A5A", stroke: "#136843", text: "#FFFFFF" },
-  reject:  { fill: "#C4432B", stroke: "#97301D", text: "#FFFFFF" },
+  idle:    { fill: "#FFFFFF", stroke: "#101820", text: "#101820" },
+  visited: { fill: "#FBE7C6", stroke: "#E8890C", text: "#101820" },
+  current: { fill: "#E8890C", stroke: "#E8890C", text: "#FFFFFF" },
+  accept:  { fill: "#1A7F4B", stroke: "#1A7F4B", text: "#FFFFFF" },
+  reject:  { fill: "#B3321F", stroke: "#B3321F", text: "#FFFFFF" },
 };
-const EDGE_IDLE = "#7F95A3";
-const EDGE_HOT = "#E8A10C";
+const EDGE_IDLE = "#3A4550";
+const EDGE_HOT = "#E8890C";
 
 class Graph {
   constructor(el) {
@@ -60,26 +70,27 @@ class Graph {
     this.deadIds = new Set();
   }
 
-  renderer(id) {
+  renderer(id, rawLabel) {
     const self = this;
-    return ({ ctx, x, y, label }) => {
-      const r = 26;
+    const label = formatStateLabel(rawLabel);
+    return ({ ctx, x, y }) => {
+      const r = 24;
       return {
         drawNode() {
           const m = self.meta[id] || {};
-          const col = PAL[m.state || "idle"];
+          const col = PAL[m.state || "idle"] || PAL.idle;
           ctx.save();
           if (m.start) {                       // start arrow drawn from the left
-            ctx.strokeStyle = "#15232D"; ctx.fillStyle = "#15232D"; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(x - r - 34, y); ctx.lineTo(x - r - 3, y); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x - r - 1, y); ctx.lineTo(x - r - 10, y - 5); ctx.lineTo(x - r - 10, y + 5); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "#101820"; ctx.fillStyle = "#101820"; ctx.lineWidth = 1.6;
+            ctx.beginPath(); ctx.moveTo(x - r - 28, y); ctx.lineTo(x - r - 2, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x - r - 1, y); ctx.lineTo(x - r - 8, y - 4); ctx.lineTo(x - r - 8, y + 4); ctx.closePath(); ctx.fill();
           }
-          if (m.dead) ctx.setLineDash([5, 4]);
-          ctx.lineWidth = 2.5; ctx.strokeStyle = col.stroke; ctx.fillStyle = col.fill;
+          if (m.dead) ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1.6; ctx.strokeStyle = col.stroke; ctx.fillStyle = col.fill;
           ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          if (m.acc) { ctx.beginPath(); ctx.arc(x, y, r - 5.5, 0, Math.PI * 2); ctx.stroke(); }
+          if (m.acc) { ctx.beginPath(); ctx.arc(x, y, r - 5, 0, Math.PI * 2); ctx.stroke(); }
           ctx.setLineDash([]);
-          ctx.fillStyle = col.text; ctx.font = "600 15px 'JetBrains Mono', monospace";
+          ctx.fillStyle = col.text; ctx.font = "italic 600 15px 'Newsreader', serif";
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.fillText(label, x, y + 1);
           ctx.restore();
@@ -97,13 +108,13 @@ class Graph {
     this.meta = {};
     const nodes = g.nodes.filter((n) => !hidden(n.id)).map((n) => {
       this.meta[n.id] = { acc: n.accepting, start: n.start, dead: n.dead, state: "idle" };
-      return { id: n.id, label: n.label, shape: "custom", size: 26, ctxRenderer: this.renderer(n.id) };
+      return { id: n.id, label: formatStateLabel(n.label), shape: "custom", size: 24, ctxRenderer: this.renderer(n.id, n.label) };
     });
     const edges = g.edges.filter((e) => !hidden(e.from) && !hidden(e.to)).map((e) => ({
       id: `${e.from}>${e.to}`, from: e.from, to: e.to, label: e.label, symbols: e.symbols,
-      arrows: { to: { enabled: true, scaleFactor: 0.8 } },
-      color: { color: EDGE_IDLE, highlight: EDGE_IDLE }, width: 1.8,
-      font: { size: 15, face: "JetBrains Mono", color: "#15232D", strokeWidth: 5, strokeColor: "#ffffff", align: "horizontal" },
+      arrows: { to: { enabled: true, scaleFactor: 0.7 } },
+      color: { color: EDGE_IDLE, highlight: EDGE_IDLE }, width: 1.4,
+      font: { size: 16, face: "Newsreader", color: "#101820", strokeWidth: 5, strokeColor: "#F3F5F8", align: "horizontal" },
       smooth: e.from === e.to ? false : { enabled: true, type: "curvedCW", roundness: 0.22 },
     }));
     this.edges = new vis.DataSet(edges);
@@ -128,7 +139,7 @@ class Graph {
 
   resetColors() {
     Object.values(this.meta).forEach((m) => (m.state = "idle"));
-    if (this.edges) this.edges.update(this.edges.getIds().map((id) => ({ id, color: { color: EDGE_IDLE, highlight: EDGE_IDLE }, width: 1.8 })));
+    if (this.edges) this.edges.update(this.edges.getIds().map((id) => ({ id, color: { color: EDGE_IDLE, highlight: EDGE_IDLE }, width: 1.4 })));
     if (this.net) this.net.redraw();
   }
 
@@ -146,9 +157,11 @@ class Graph {
     }
     if (this.edges) {
       this.edges.update(this.edges.getIds().map((id) => ({
-        id, color: { color: hot.has(id) ? EDGE_HOT : EDGE_IDLE, highlight: EDGE_HOT }, width: hot.has(id) ? 3.6 : 1.8,
+        id, color: { color: hot.has(id) ? EDGE_HOT : EDGE_IDLE, highlight: EDGE_HOT }, width: hot.has(id) ? 3 : 1.4,
       })));
     }
+    if (this.net) this.net.redraw();
+  }
     if (this.net) this.net.redraw();
   }
 
@@ -335,6 +348,7 @@ function resetOutputs() {
   $("#verdict").hidden = true; $("#metrics").hidden = true; $("#runOut").hidden = true;
   $("#graphEmpty").hidden = false;
   if ($("#dfaTableWrap")) $("#dfaTableWrap").hidden = true;
+  if ($("#figCaption")) $("#figCaption").textContent = "";
   if (mainGraph.net) { mainGraph.net.destroy(); mainGraph.net = null; }
   stopPlay();
 }
@@ -372,12 +386,12 @@ function renderVerdict(res) {
   v.hidden = false;
   if (!res.reference) {
     v.className = "verdict info";
-    v.textContent = "Learned a DFA. Pick a preset language to compare it with a reference.";
+    v.textContent = "Learned a DFA. Select a preset language to compare with a reference.";
     return;
   }
   if (res.reference.equivalent) {
     v.className = "verdict ok";
-    v.innerHTML = `<strong>Same language as the reference.</strong> The learned machine accepts exactly the strings the reference accepts.`;
+    v.innerHTML = `<strong>Same language as the reference.</strong> The learned machine accepts the exact language of the reference.`;
   } else {
     const ce = res.reference.counterexample;
     const refSays = res.reference.counterexample_ref_label ? "accepts" : "rejects";
@@ -413,6 +427,29 @@ function renderMetrics(res) {
   el.innerHTML = items.map(([k, v, s]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}<small>${esc(s)}</small></dd></div>`).join("");
 }
 
+function updateFigCaption() {
+  const el = $("#figCaption");
+  if (!el) return;
+  let g = null, name = "";
+  if (state.view === "learned") {
+    g = state.learned && state.learned.graph;
+    name = "Learned DFA";
+  } else if (state.view === "reference") {
+    g = state.refGraph;
+    name = "Reference DFA";
+  } else if (state.view === "nfa") {
+    g = state.nfaGraph;
+    name = "Reference NFA";
+  }
+  if (!g || !g.nodes || !g.nodes.length) {
+    el.textContent = "";
+    return;
+  }
+  const total = g.nodes.length;
+  const acc = g.nodes.filter((n) => n.accepting).length;
+  el.textContent = `Figure 1. ${name}: ${total} state${total === 1 ? "" : "s"}, ${acc} accepting.`;
+}
+
 function renderDfaTable() {
   const wrap = $("#dfaTableWrap");
   if (!state.learned || !state.learned.dfa) {
@@ -439,10 +476,10 @@ function renderDfaTable() {
     else if (isAcc) marker = "*";
 
     html += `<tr data-state="${s}">`;
-    html += `<td class="mono"><span class="marker">${marker}</span>q${s}</td>`;
+    html += `<td class="mono font-semibold">${marker ? `<span class="marker">${marker}</span> ` : `<span class="marker"></span>`}q${toSubscript(s)}</td>`;
     alphabet.forEach((a) => {
       const to = transMap.get(`${s}:${a}`);
-      const toStr = to !== undefined ? `q${to}` : "–";
+      const toStr = to !== undefined ? `q${toSubscript(to)}` : "–";
       html += `<td class="mono">${toStr}</td>`;
     });
     html += `</tr>`;
@@ -473,12 +510,14 @@ function drawMain() {
     if (mainGraph.net) { mainGraph.net.destroy(); mainGraph.net = null; }
     $("#graphEmpty").hidden = false;
     $("#graphEmpty").textContent = state.view === "learned"
-      ? "Generate some examples and press Learn automaton to draw the machine."
+      ? "Provide examples and select Learn automaton to display the machine."
       : "No reference machine for a custom language.";
+    updateFigCaption();
     return;
   }
   $("#graphEmpty").hidden = true;
   mainGraph.load(g, showDead);
+  updateFigCaption();
 }
 
 /* ------------------------------------------------------------------ *
@@ -527,7 +566,7 @@ function paintStep() {
     else if (i === state.k) cls += final ? (state.accepted ? " accept" : " reject") : " now";
     else cls += " ahead";
     if (i > 0) parts.push(`<span class="sym ${i > state.k ? "ahead" : ""}">–${esc(state.symSeq[i - 1])}→</span>`);
-    parts.push(`<span class="${cls}">q${id}</span>`);
+    parts.push(`<span class="${cls}">q${toSubscript(id)}</span>`);
   });
   $("#trace").innerHTML = parts.join("");
   const res = $("#runResult");
@@ -573,25 +612,25 @@ function togglePlay() {
  * ------------------------------------------------------------------ */
 function lineChart(id, labels, accuracy, states, refStates, xTitle) {
   if (state.charts[id]) state.charts[id].destroy();
-  const mono = { family: "'JetBrains Mono', monospace", size: 11 };
+  const mono = { family: "'IBM Plex Mono', monospace", size: 11 };
   state.charts[id] = new Chart($("#" + id), {
     type: "line",
     data: {
       labels,
       datasets: [
-        { label: "Accuracy on unseen strings", data: accuracy, yAxisID: "y", borderColor: "#0E6B8C", backgroundColor: "#0E6B8C", tension: 0.2, pointRadius: 4 },
-        { label: "States learned", data: states, yAxisID: "y2", borderColor: "#E8A10C", backgroundColor: "#E8A10C", tension: 0.2, pointRadius: 4 },
-        { label: "States in reference", data: labels.map(() => refStates), yAxisID: "y2", borderColor: "#15232D", borderDash: [6, 5], pointRadius: 0, borderWidth: 1.5 },
+        { label: "Accuracy on unseen strings", data: accuracy, yAxisID: "y", borderColor: "#1F3FBF", backgroundColor: "#1F3FBF", tension: 0.2, pointRadius: 3.5 },
+        { label: "States learned", data: states, yAxisID: "y2", borderColor: "#E8890C", backgroundColor: "#E8890C", tension: 0.2, pointRadius: 3.5 },
+        { label: "States in reference", data: labels.map(() => refStates), yAxisID: "y2", borderColor: "#101820", borderDash: [5, 4], pointRadius: 0, borderWidth: 1.4 },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 12 } } } },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 12, family: "'IBM Plex Sans', sans-serif" } } } },
       scales: {
-        x: { title: { display: true, text: xTitle }, ticks: { font: mono } },
-        y: { min: 0.4, max: 1, title: { display: true, text: "Accuracy" }, ticks: { callback: (v) => Math.round(v * 100) + "%", font: mono } },
-        y2: { position: "right", min: 0, title: { display: true, text: "States" }, grid: { drawOnChartArea: false }, ticks: { font: mono, precision: 0 } },
+        x: { title: { display: true, text: xTitle, font: { family: "'IBM Plex Sans', sans-serif" } }, ticks: { font: mono } },
+        y: { min: 0.4, max: 1, title: { display: true, text: "Accuracy", font: { family: "'IBM Plex Sans', sans-serif" } }, ticks: { callback: (v) => Math.round(v * 100) + "%", font: mono } },
+        y2: { position: "right", min: 0, title: { display: true, text: "States", font: { family: "'IBM Plex Sans', sans-serif" } }, grid: { drawOnChartArea: false }, ticks: { font: mono, precision: 0 } },
       },
     },
   });
@@ -637,7 +676,7 @@ async function runCluster() {
   setBtnLoading(btn, true);
   try {
     const r = await api("/cluster", { alphabet, examples: rows, k: +$("#clusterK").value });
-    const colors = ["#0E6B8C", "#E8A10C", "#7A4FB5", "#1B8A5A", "#C4432B", "#4B5D69", "#C06A9B", "#6B8E23"];
+    const colors = ["#1F3FBF", "#E8890C", "#1A7F4B", "#B3321F", "#5C6773", "#6F42C1", "#8C6843", "#007A87"];
     const sets = [];
     const k = +$("#clusterK").value;
     for (let c = 0; c < k; c++) {
@@ -647,7 +686,7 @@ async function runCluster() {
         sets.push({
           label: `Cluster ${c + 1}, ${lab ? "accepted" : "rejected"}`,
           data: pts.map((p) => ({ x: p.x, y: p.y, s: p.s })),
-          pointStyle: lab ? "circle" : "triangle", pointRadius: 6,
+          pointStyle: lab ? "circle" : "triangle", pointRadius: 5.5,
           backgroundColor: colors[c % colors.length] + (lab ? "" : "99"), borderColor: colors[c % colors.length],
         });
       });
@@ -660,10 +699,13 @@ async function runCluster() {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
+          legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11.5, family: "'IBM Plex Sans', sans-serif" } } },
           tooltip: { callbacks: { label: (ctx) => `"${show(ctx.raw.s)}"` } },
         },
-        scales: { x: { title: { display: true, text: "Principal component 1" } }, y: { title: { display: true, text: "Principal component 2" } } },
+        scales: {
+          x: { title: { display: true, text: "Principal component 1", font: { family: "'IBM Plex Sans', sans-serif" } }, ticks: { font: { family: "'IBM Plex Mono', monospace" } } },
+          y: { title: { display: true, text: "Principal component 2", font: { family: "'IBM Plex Sans', sans-serif" } }, ticks: { font: { family: "'IBM Plex Mono', monospace" } } }
+        },
       },
     });
     const t = $("#clusterTable");
@@ -716,6 +758,10 @@ async function runNfa() {
     const r = await api("/nfa/convert", nfa);
     nfaGraph.load(r.nfa_graph, true);
     nfaDfaGraph.load(r.min_graph, false);
+    const capNfa = $("#figNfaCaption");
+    if (capNfa) capNfa.textContent = `Figure 2. NFA: ${r.nfa_states} states, ${r.nfa.accepting ? r.nfa.accepting.length : 0} accepting.`;
+    const capDfa = $("#figNfaDfaCaption");
+    if (capDfa) capDfa.textContent = `Figure 3. Equivalent minimal DFA: ${r.min_states} states.`;
     $("#nfaSummary").textContent = `${r.nfa_states} NFA states became ${r.dfa_states} DFA states after subset construction, and ${r.min_states} after minimization.`;
     const st = $("#subsetTable");
     st.hidden = false;

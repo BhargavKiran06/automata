@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import time
 from collections import Counter
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -223,3 +224,163 @@ def lstar(alphabet: List[str], teacher: DFA, max_rounds: int = 200) -> Tuple[DFA
     stats["rounds"] = stats["equivalence_queries"]
     assert hyp is not None
     return hyp, stats
+
+
+# --------------------------------------------------------------------- EDSM
+def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
+         z: float = 1.0, time_budget: float = 6.0) -> Tuple[DFA, dict]:
+    """Blue-fringe EDSM (evidence-driven state merging).
+
+    Unlike RPNI, which merges the first compatible pair it finds, EDSM scores
+    every candidate merge by how many accepted/rejected labels it brings
+    together (agreements) and performs the best one first. With noise > 0 a
+    merge may contain some label conflicts: it is accepted while the conflict
+    count stays within what noise of that size would explain (binomial bound).
+    noise = 0 means strict EDSM (no conflicts allowed).
+    """
+    samples, conflicts_resolved = clean_samples(samples)
+    trans, _label = build_pta(samples, alphabet)
+    n_states = len(_label)
+    order = {a: i for i, a in enumerate(alphabet)}
+    prefixes = {""}
+    for s, _ in samples:
+        for i in range(1, len(s) + 1):
+            prefixes.add(s[:i])
+    ordered = sorted(prefixes, key=lambda p: (len(p), [order[c] for c in p]))
+    ident = {p: i for i, p in enumerate(ordered)}
+    pos = {i: 0 for i in range(n_states)}
+    neg = {i: 0 for i in range(n_states)}
+    for s, lab in samples:
+        (pos if lab else neg)[ident[s]] += 1
+
+    p0 = 2 * noise * (1 - noise)
+
+    def majority(x: int) -> Optional[bool]:
+        if pos[x] == neg[x]:
+            return None
+        return pos[x] > neg[x]
+
+    def valid(agree: int, conflict: int) -> bool:
+        if conflict == 0:
+            return True
+        if noise <= 0:
+            return False
+        m = agree + conflict
+        return conflict <= p0 * m + z * (m * p0 * (1 - p0)) ** 0.5
+
+    def merge(r: int, q: int, parent: Tuple[int, str], commit: bool) -> Tuple[int, int]:
+        log: List[tuple] = []
+
+        def set_t(k, v):
+            log.append(("t", k, trans.get(k)))
+            trans[k] = v
+
+        def add_counts(x, p, n):
+            log.append(("c", x, (pos[x], neg[x])))
+            pos[x] += p
+            neg[x] += n
+
+        set_t(parent, r)
+        agree = conflict = 0
+        stack = [(r, q)]
+        while stack:
+            x, y = stack.pop()
+            if x == y:
+                continue
+            mx, my = majority(x), majority(y)
+            if mx is not None and my is not None:
+                if mx == my:
+                    agree += 1
+                else:
+                    conflict += 1
+            if pos[y] or neg[y]:
+                add_counts(x, pos[y], neg[y])
+            for a in alphabet:
+                ty = trans.get((y, a))
+                if ty is None:
+                    continue
+                tx = trans.get((x, a))
+                if tx is None:
+                    set_t((x, a), ty)
+                else:
+                    stack.append((tx, ty))
+        if not commit:
+            for kind, k, old in reversed(log):
+                if kind == "t":
+                    if old is None:
+                        del trans[k]
+                    else:
+                        trans[k] = old
+                else:
+                    pos[k], neg[k] = old
+        return agree, conflict
+
+    red: List[int] = [0]
+    merges = 0
+    t_start = time.perf_counter()
+    fallback = False
+
+    def blue_states() -> Dict[int, Tuple[int, str]]:
+        rs = set(red)
+        out: Dict[int, Tuple[int, str]] = {}
+        for r in red:
+            for a in alphabet:
+                t = trans.get((r, a))
+                if t is not None and t not in rs:
+                    out[t] = (r, a)
+        return out
+
+    while True:
+        blues = blue_states()
+        if not blues:
+            break
+        if not fallback and time.perf_counter() - t_start > time_budget:
+            fallback = True     # out of time: finish quickly, RPNI-style
+        if fallback:
+            q = min(blues)
+            for r in sorted(red):
+                ag, cf = merge(r, q, blues[q], commit=False)
+                if valid(ag, cf):
+                    merge(r, q, blues[q], commit=True)
+                    merges += 1
+                    break
+            else:
+                red.append(q)
+            continue
+        best = None            # (score, -q, -r, q, r)
+        promote = None
+        for q in sorted(blues):
+            cands = []
+            for r in sorted(red):
+                ag, cf = merge(r, q, blues[q], commit=False)
+                if valid(ag, cf):
+                    cands.append((ag - cf, -r, r))
+            if not cands:
+                promote = q
+                break
+            sc, _nr, r = max(cands)
+            key = (sc, -q)
+            if best is None or key > best[0]:
+                best = (key, q, r)
+        if promote is not None:
+            red.append(promote)
+            continue
+        _, q, r = best
+        merge(r, q, blues[q], commit=True)
+        merges += 1
+
+    seen, stack = {0}, [0]
+    while stack:
+        u = stack.pop()
+        for a in alphabet:
+            v = trans.get((u, a))
+            if v is not None and v not in seen:
+                seen.add(v)
+                stack.append(v)
+    ids = {s: i for i, s in enumerate(sorted(seen))}
+    delta = {(ids[s], a): ids[t] for (s, a), t in trans.items() if s in seen and t in seen}
+    acc = {ids[s] for s in seen if pos[s] > neg[s]}
+    dfa = DFA(alphabet, ids.values(), ids[0], acc, delta)
+    return dfa, {"pta_states": n_states, "merges": merges,
+                 "conflicts_resolved": conflicts_resolved, "training_size": len(samples),
+                 "noise_assumed": noise, "fallback_used": fallback}

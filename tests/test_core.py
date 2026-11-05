@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from automata import DFA, NFA
 from generator import PRESETS, generate_examples, reference
-from learning import lstar, rpni
+from learning import edsm, lstar, rpni
 
 
 def test_dfa_simulation_and_minimization():
@@ -60,3 +60,24 @@ def test_noise_inflates_state_count():
     clean, _ = rpni(generate_examples(ref, 100, 8, noise=0.0, seed=1), ["0", "1"])
     noisy, _ = rpni(generate_examples(ref, 100, 8, noise=0.2, seed=1), ["0", "1"])
     assert len(noisy.minimized().states) > len(clean.minimized().states)
+
+
+def test_strict_edsm_fits_training_data():
+    for key in ["ends_with_01", "even_zeros", "contains_101", "div_by_3", "no_11"]:
+        ref = reference(key)
+        ex = generate_examples(ref, 80, 8, seed=7)
+        dfa, _ = edsm(ex, PRESETS[key]["alphabet"], noise=0.0)
+        assert all(dfa.accepts(s) == lab for s, lab in ex), key
+
+
+def test_tolerant_edsm_survives_label_noise():
+    ref = reference("div_by_3")
+    exact = 0
+    for seed in range(5):
+        ex = generate_examples(ref, 300, 10, noise=0.1, seed=seed)
+        dfa, _ = edsm(ex, ["0", "1"], noise=0.1)
+        exact += dfa.equivalent(ref)
+    assert exact >= 4
+    # strict RPNI on the same data needs far more states
+    ex = generate_examples(ref, 300, 10, noise=0.1, seed=0)
+    assert len(rpni(ex, ["0", "1"])[0].minimized().states) > 10
