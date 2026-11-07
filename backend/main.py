@@ -6,6 +6,7 @@ Open: http://127.0.0.1:8000
 from __future__ import annotations
 
 import os
+import random
 import time
 from typing import Dict, List, Optional
 
@@ -16,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from automata import DFA, NFA
-from generator import PRESETS, generate_examples, reference, test_set
+from generator import (PRESETS, generate_examples, length_test, reference, shortest_disagreement,
+                       test_set)
 from learning import clean_samples, edsm, lstar, rpni
 
 app = FastAPI(title="Automata Lab")
@@ -82,9 +84,11 @@ class NfaReq(BaseModel):
 def languages():
     out = []
     for key, p in PRESETS.items():
-        ref = reference(key).minimized()
+        ref = reference(key)
+        regular = getattr(ref, "regular", True)
         out.append({"key": key, "title": p["title"], "alphabet": p["alphabet"],
-                    "desc": p["desc"], "min_states": len(ref.states),
+                    "desc": p["desc"], "regular": regular,
+                    "min_states": len(ref.minimized().states) if regular else None,
                     "has_nfa": "nfa" in p})
     return out
 
@@ -93,8 +97,11 @@ def languages():
 def reference_graph(key: str):
     if key not in PRESETS:
         raise HTTPException(404, "Unknown language")
-    ref = reference(key).minimized()
-    return {"dfa": ref.to_dict(), "graph": ref.graph(),
+    raw = reference(key)
+    if not getattr(raw, "regular", True):
+        return {"dfa": None, "graph": None, "nfa": None, "regular": False}
+    ref = raw.minimized()
+    return {"dfa": ref.to_dict(), "graph": ref.graph(), "regular": True,
             "nfa": PRESETS[key]["nfa"]().graph() if "nfa" in PRESETS[key] else None}
 
 
@@ -153,6 +160,9 @@ def learn(req: LearnReq):
     if req.algorithm == "lstar":
         if ref is None:
             raise HTTPException(400, "L* needs a teacher: pick a reference language.")
+        if not getattr(ref, "regular", True):
+            raise HTTPException(400, "L* needs a regular reference language: it cannot ask exact equivalence "
+                                     "questions about a non-regular language.")
         dfa, info = lstar(alphabet, ref)
         train = set()
     else:
@@ -180,7 +190,15 @@ def learn(req: LearnReq):
     if examples:
         clean = clean_samples(examples)[0]
         resp["train_accuracy"] = sum(mini.accepts(s) == l for s, l in clean) / len(clean)
-    if ref is not None:
+    if ref is not None and not getattr(ref, "regular", True):
+        ce = shortest_disagreement(mini, ref)
+        resp["reference"] = {
+            "regular": False, "states": None, "equivalent": False, "counterexample": ce,
+            "counterexample_ref_label": (ref.accepts(ce) if ce is not None else None),
+            "note": "Not a regular language: no DFA can match it exactly.",
+        }
+        resp["metrics"] = _evaluate(mini, ref, train, req.test_max_len)
+    elif ref is not None:
         refmin = ref.minimized()
         ce = mini.counterexample(refmin)
         resp["reference"] = {
@@ -243,7 +261,9 @@ def experiment(req: ExperimentReq):
         raise HTTPException(404, "Unknown language")
     ref = reference(req.language)
     alphabet = PRESETS[req.language]["alphabet"]
-    ref_states = len([s for s in ref.minimized().states if s not in ref.minimized().sink_states()])
+    regular = getattr(ref, "regular", True)
+    ref_states = (len([s for s in ref.minimized().states if s not in ref.minimized().sink_states()])
+                  if regular else None)
 
     def trial(n: int, noise: float, seed: int, algo: str = "rpni"):
         data = generate_examples(ref, n, req.max_len, True, noise, seed)
@@ -254,7 +274,8 @@ def experiment(req: ExperimentReq):
         mini = dfa.minimized()
         # test on strings the learner has not seen; labels come from the clean reference
         m = _evaluate(mini, ref, {s for s, _ in data}, req.max_len, 800)
-        return m["accuracy"], len([s for s in mini.states if s not in mini.sink_states()]), mini.equivalent(ref)
+        return (m["accuracy"], len([s for s in mini.states if s not in mini.sink_states()]),
+                (mini.equivalent(ref) if regular else False))
 
     def curve(points, make):
         out = []
@@ -275,6 +296,51 @@ def experiment(req: ExperimentReq):
             "size_curve_edsm": curve(sizes, lambda n, seed: trial(n, 0.0, seed, "edsm")),
             "noise_curve_edsm": curve(noises, lambda z, seed: trial(req.noise_size, z, seed, "edsm")),
             "noise_size": req.noise_size, "trials": req.trials}
+
+
+class LengthReq(BaseModel):
+    language: str
+    algorithm: str = "rpni"              # "rpni" | "edsm"
+    n: int = Field(60, ge=4, le=1000)
+    max_len: int = Field(8, ge=2, le=12)
+    noise: float = Field(0.0, ge=0, le=0.45)
+    per_length: int = Field(40, ge=4, le=200)
+    max_test_len: int = Field(0, ge=0, le=30)     # 0 means 3 x max_len
+    seed: Optional[int] = 7
+
+
+@app.post("/api/length-curve")
+def length_curve(req: LengthReq):
+    """Train once, then test at every string length. For each length we test
+    members (recall) and non-members (specificity; for non-regular languages
+    these are hard near misses). Shows where generalization breaks down."""
+    if req.language not in PRESETS:
+        raise HTTPException(404, "Unknown language")
+    if req.algorithm not in ("rpni", "edsm"):
+        raise HTTPException(400, "Length curve supports rpni and edsm.")
+    ref = reference(req.language)
+    alphabet = PRESETS[req.language]["alphabet"]
+    data = generate_examples(ref, req.n, req.max_len, True, req.noise, req.seed)
+    if req.algorithm == "edsm":
+        dfa, info = edsm(data, alphabet, noise=req.noise)
+    else:
+        dfa, info = rpni(data, alphabet)
+    mini = dfa.minimized()
+    top = min(30, req.max_test_len or 3 * req.max_len)
+    rng = random.Random(req.seed)
+    points = []
+    for ell in range(top + 1):
+        members, others = length_test(ref, ell, rng, req.per_length)
+        recall = (sum(mini.accepts(s) for s in members) / len(members)) if members else None
+        spec = (sum(not mini.accepts(s) for s in others) / len(others)) if others else None
+        points.append({"length": ell, "recall": recall, "specificity": spec,
+                       "n_members": len(members), "n_others": len(others),
+                       "beyond_training": ell > req.max_len})
+    return {"language": req.language, "regular": getattr(ref, "regular", True),
+            "algorithm": req.algorithm, "train_max_len": req.max_len,
+            "training_size": len(data),
+            "states": len([s for s in mini.states if s not in mini.sink_states()]),
+            "points": points}
 
 
 def _features(strings: List[str], alphabet: List[str]) -> np.ndarray:

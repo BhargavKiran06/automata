@@ -16,6 +16,8 @@ def test_dfa_simulation_and_minimization():
 def test_minimization_preserves_language():
     for key in PRESETS:
         ref = reference(key)
+        if not getattr(ref, "regular", True):      # a^n b^n etc. have no DFA to minimize
+            continue
         assert ref.minimized().equivalent(ref)
 
 
@@ -51,6 +53,8 @@ def test_rpni_recovers_simple_languages():
 def test_lstar_learns_exactly():
     for key, p in PRESETS.items():
         ref = reference(key)
+        if not getattr(ref, "regular", True):      # L* needs exact equivalence queries
+            continue
         dfa, stats = lstar(p["alphabet"], ref)
         assert dfa.equivalent(ref), key
 
@@ -81,3 +85,23 @@ def test_tolerant_edsm_survives_label_noise():
     # strict RPNI on the same data needs far more states
     ex = generate_examples(ref, 300, 10, noise=0.1, seed=0)
     assert len(rpni(ex, ["0", "1"])[0].minimized().states) > 10
+
+
+def test_replay_history_matches_final_machine():
+    pos = ["", "ab", "aabb", "aaabbb"]
+    neg = ["a", "b", "aa", "bb", "ba", "aab", "abb", "abab"]
+    data = [(s, True) for s in pos] + [(s, False) for s in neg]
+    for fn in (rpni, lambda d, a: edsm(d, a)):
+        dfa, info = fn(data, ["a", "b"])
+        frames = info["history"]
+        assert frames and frames[0]["nodes"][0]["start"]
+        assert len(frames[0]["nodes"]) == info["pta_states"]
+        assert len(frames[-1]["nodes"]) == len(dfa.reachable().states)
+        counts = [len(f["nodes"]) for f in frames]
+        assert counts == sorted(counts, reverse=True)      # states never increase
+
+
+def test_replay_skipped_for_large_inputs():
+    ex = generate_examples(reference("div_by_3"), 300, 10, seed=1)
+    _, info = rpni(ex, ["0", "1"])
+    assert info["history"] is None and info["history_skipped"]

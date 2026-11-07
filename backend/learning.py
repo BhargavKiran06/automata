@@ -32,6 +32,42 @@ def clean_samples(samples: List[Sample]) -> Tuple[List[Sample], int]:
     return out, conflicts
 
 
+
+MAX_REPLAY = 60   # record a step-by-step history only for small prefix trees
+
+
+def _ordered_prefixes(samples: List[Sample], alphabet: List[str]) -> List[str]:
+    order = {a: i for i, a in enumerate(alphabet)}
+    prefixes = {""}
+    for s, _ in samples:
+        for i in range(1, len(s) + 1):
+            prefixes.add(s[:i])
+    return sorted(prefixes, key=lambda p: (len(p), [order[c] for c in p]))
+
+
+def _snapshot(text: str, names: List[str], trans, lab, red, blues, alphabet) -> dict:
+    """One frame of the replay: the machine as it stands, with red (decided)
+    and blue (candidate) states marked. `lab(x)` gives True/False/None."""
+    seen, stack = {0}, [0]
+    while stack:
+        u = stack.pop()
+        for a in alphabet:
+            v = trans.get((u, a))
+            if v is not None and v not in seen:
+                seen.add(v)
+                stack.append(v)
+    rs, bs = set(red), set(blues)
+    nodes = [{"id": x, "label": names[x] or "ε",
+              "role": "red" if x in rs else ("blue" if x in bs else "tree"),
+              "accepting": lab(x), "start": x == 0} for x in sorted(seen)]
+    grouped: Dict[Tuple[int, int], List[str]] = {}
+    for (u, a), v in sorted(trans.items()):
+        if u in seen and v in seen:
+            grouped.setdefault((u, v), []).append(a)
+    edges = [{"from": u, "to": v, "label": ",".join(sym)} for (u, v), sym in grouped.items()]
+    return {"text": text, "nodes": nodes, "edges": edges}
+
+
 # --------------------------------------------------------------------- RPNI
 def build_pta(samples: List[Sample], alphabet: List[str]):
     """Prefix tree acceptor. State ids follow length-lexicographic order of
@@ -59,6 +95,10 @@ def rpni(samples: List[Sample], alphabet: List[str]) -> Tuple[DFA, dict]:
     pta_states = len(label)
     red: List[int] = [0]
     merges = 0
+    names = _ordered_prefixes(samples, alphabet)
+    record = pta_states <= MAX_REPLAY
+    history: List[dict] = []
+    nm = lambda x: "“" + (names[x] or "ε") + "”"
 
     def blue_states() -> Dict[int, Tuple[int, str]]:
         rs = set(red)
@@ -114,6 +154,11 @@ def rpni(samples: List[Sample], alphabet: List[str]) -> Tuple[DFA, dict]:
                     stack.append((tx, ty))
         return True
 
+    if record:
+        history.append(_snapshot(
+            f"Prefix tree built from {len(samples)} examples: one state per prefix. "
+            "Red states are decided; blue states are the next candidates.",
+            names, trans, label.get, red, blue_states(), alphabet))
     while True:
         blues = blue_states()
         if not blues:
@@ -124,9 +169,17 @@ def rpni(samples: List[Sample], alphabet: List[str]) -> Tuple[DFA, dict]:
             if try_merge(r, q, blues[q]):
                 merges += 1
                 done = True
+                if record:
+                    history.append(_snapshot(
+                        f"Merged {nm(q)} into {nm(r)}: no accepted string and rejected string end up in the same state.",
+                        names, trans, label.get, red, blue_states(), alphabet))
                 break
         if not done:
             red.append(q)
+            if record:
+                history.append(_snapshot(
+                    f"{nm(q)} cannot merge into any earlier state without mixing accepted and rejected strings, so it stays as a new state.",
+                    names, trans, label.get, red, blue_states(), alphabet))
 
     # collect reachable part, unlabeled states count as reject
     seen, stack = {0}, [0]
@@ -142,7 +195,8 @@ def rpni(samples: List[Sample], alphabet: List[str]) -> Tuple[DFA, dict]:
     acc = {ids[s] for s in seen if label[s] is True}
     dfa = DFA(alphabet, ids.values(), ids[0], acc, delta)
     info = {"pta_states": pta_states, "merges": merges, "conflicts_resolved": conflicts,
-            "training_size": len(samples)}
+            "training_size": len(samples), "history": history if record else None,
+            "history_skipped": not record}
     return dfa, info
 
 
@@ -319,6 +373,10 @@ def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
     merges = 0
     t_start = time.perf_counter()
     fallback = False
+    names = ordered
+    record = n_states <= MAX_REPLAY
+    history: List[dict] = []
+    nm = lambda x: "“" + (names[x] or "ε") + "”"
 
     def blue_states() -> Dict[int, Tuple[int, str]]:
         rs = set(red)
@@ -330,6 +388,11 @@ def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
                     out[t] = (r, a)
         return out
 
+    if record:
+        history.append(_snapshot(
+            f"Prefix tree built from {len(samples)} examples. EDSM will score every possible merge "
+            "and do the best-supported one first.",
+            names, trans, majority, red, blue_states(), alphabet))
     while True:
         blues = blue_states()
         if not blues:
@@ -343,9 +406,15 @@ def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
                 if valid(ag, cf):
                     merge(r, q, blues[q], commit=True)
                     merges += 1
+                    if record:
+                        history.append(_snapshot(f"Merged {nm(q)} into {nm(r)} (time limit: first acceptable merge).",
+                                                 names, trans, majority, red, blue_states(), alphabet))
                     break
             else:
                 red.append(q)
+                if record:
+                    history.append(_snapshot(f"{nm(q)} stays as a new state.",
+                                             names, trans, majority, red, blue_states(), alphabet))
             continue
         best = None            # (score, -q, -r, q, r)
         promote = None
@@ -364,10 +433,19 @@ def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
                 best = (key, q, r)
         if promote is not None:
             red.append(promote)
+            if record:
+                history.append(_snapshot(
+                    f"{nm(promote)} has no acceptable merge (too many label conflicts), so it becomes a new state.",
+                    names, trans, majority, red, blue_states(), alphabet))
             continue
         _, q, r = best
-        merge(r, q, blues[q], commit=True)
+        ag, cf = merge(r, q, blues[q], commit=True)
         merges += 1
+        if record:
+            note = "no conflicts" if cf == 0 else f"{cf} conflicting label{'s' if cf != 1 else ''} tolerated as noise"
+            history.append(_snapshot(
+                f"Best-supported merge: {nm(q)} into {nm(r)} ({ag} agreeing labels, {note}).",
+                names, trans, majority, red, blue_states(), alphabet))
 
     seen, stack = {0}, [0]
     while stack:
@@ -383,4 +461,5 @@ def edsm(samples: List[Sample], alphabet: List[str], noise: float = 0.0,
     dfa = DFA(alphabet, ids.values(), ids[0], acc, delta)
     return dfa, {"pta_states": n_states, "merges": merges,
                  "conflicts_resolved": conflicts_resolved, "training_size": len(samples),
-                 "noise_assumed": noise, "fallback_used": fallback}
+                 "noise_assumed": noise, "fallback_used": fallback,
+                 "history": history if record else None, "history_skipped": not record}

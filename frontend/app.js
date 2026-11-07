@@ -162,8 +162,6 @@ class Graph {
     }
     if (this.net) this.net.redraw();
   }
-    if (this.net) this.net.redraw();
-  }
 
   clearTimers() { /* placeholder for symmetry with animation timers */ }
 }
