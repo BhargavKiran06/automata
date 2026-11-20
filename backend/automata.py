@@ -157,6 +157,12 @@ class DFA:
             "transitions": [[s, a, t] for (s, a), t in sorted(self.delta.items())],
         }
 
+    def to_nfa(self) -> "NFA":
+        delta: Dict[Tuple[int, str], Set[int]] = {}
+        for (s, a), t in self.delta.items():
+            delta[(s, a)] = {t}
+        return NFA(self.alphabet, self.states, self.start, self.accepting, delta)
+
     @staticmethod
     def from_dict(d: dict) -> "DFA":
         return DFA(d["alphabet"], d["states"], d["start"], d["accepting"],

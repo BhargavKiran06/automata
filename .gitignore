@@ -24,4 +24,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+*.bat
+PRESENTATION_SCRIPT.txt
 

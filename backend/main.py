@@ -185,6 +185,8 @@ def learn(req: LearnReq):
         "states_with_sink": len(mini.states),
         "dfa": mini.to_dict(),
         "graph": mini.graph(),
+        "nfa": (PRESETS[req.reference]["nfa"]().to_dict() if req.reference in PRESETS and "nfa" in PRESETS[req.reference] else mini.to_nfa().to_dict()),
+        "nfa_graph": (PRESETS[req.reference]["nfa"]().graph() if req.reference in PRESETS and "nfa" in PRESETS[req.reference] else mini.to_nfa().graph()),
     }
     # fit on the training set itself
     if examples:

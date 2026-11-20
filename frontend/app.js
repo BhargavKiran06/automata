@@ -266,11 +266,11 @@ async function initLanguages() {
   const sel = $("#language");
   sel.innerHTML = state.languages.map((l) => `<option value="${l.key}">${esc(l.title)}</option>`).join("") +
     `<option value="custom">Custom (my own examples)</option>`;
-  sel.addEventListener("change", () => onLanguage(sel.value, true));
-  await onLanguage(state.languages[0].key, false);
+  sel.addEventListener("change", () => onLanguage(sel.value));
+  await onLanguage(state.languages[0].key);
 }
 
-async function onLanguage(key, clearExamples) {
+async function onLanguage(key) {
   state.lang = key;
   const custom = key === "custom";
   $("#alphaField").hidden = !custom;
@@ -289,7 +289,7 @@ async function onLanguage(key, clearExamples) {
   } else {
     showError("#expError", "");
   }
-  const info = state.languages.find((l) => l.key === key);
+  const info = state.languages.find((l) => l.key === key) || {};
   $("#langDesc").textContent = custom
     ? "Type your own alphabet and labeled strings. There is no reference to compare against."
     : `${info.desc} Smallest DFA: ${info.min_states} states (including the dead state).`;
@@ -297,23 +297,38 @@ async function onLanguage(key, clearExamples) {
   if (custom && $("#algorithm").value === "lstar") $("#algorithm").value = "rpni";
   updateAlgoHint();
   state.refGraph = null; state.nfaGraph = null;
-  $("#viewNfaBtn").hidden = custom || !info.has_nfa;
+  const viewNfaBtn = $("#viewNfaBtn");
+  if (viewNfaBtn) viewNfaBtn.hidden = custom || !info.has_nfa;
   if (!custom) {
     const ref = await api(`/reference/${key}`);
     state.refGraph = ref.graph;
     state.nfaGraph = ref.nfa;
   }
-  if (clearExamples) {
+  if (custom) {
     $("#examples").value = "";
     state.learned = null;
     setView("learned");
     resetOutputs();
-  }
-  updateSummary();
-  if (!clearExamples) {   // first load: show something useful straight away
+    updateSummary();
+  } else {
+    // Automatically generate fresh balanced examples and learn the DFA right away
     await generate();
     await learn();
   }
+}
+
+async function resetAll() {
+  if (!state.languages || !state.languages.length) return;
+  const first = state.languages[0].key;
+  $("#language").value = first;
+  $("#genN").value = 40;
+  $("#genLen").value = 8;
+  $("#genNoise").value = 0;
+  $("#genBalance").checked = true;
+  $("#algorithm").value = "rpni";
+  $("#testStr").value = "";
+  $("#showDead").checked = false;
+  await onLanguage(first);
 }
 
 function updateAlgoHint() {
@@ -373,6 +388,7 @@ async function learn() {
     renderVerdict(res);
     renderMetrics(res);
     renderDfaTable();
+    renderNfaTab();
     $("#runOut").hidden = true; stopPlay();
     $("#btnRun").textContent = "Run on learned DFA";
   } catch (e) { showError("#learnError", e.message); }
@@ -715,62 +731,104 @@ async function runCluster() {
 }
 
 /* ------------------------------------------------------------------ *
- *  NFA to DFA
+ *  NFA Representation (converted from Learned DFA)
  * ------------------------------------------------------------------ */
-const NFA_DEFAULT = `alphabet: 0 1
-start: 0
-accept: 3
-# one transition per line:  state symbol -> targets
-0 0 -> 0
-0 1 -> 0,1
-1 0 -> 2
-1 1 -> 2
-2 0 -> 3
-2 1 -> 3`;
+function renderNfaTab() {
+  if (!state.learned) return;
+  const langInfo = state.languages ? state.languages.find((l) => l.key === state.lang) : null;
+  const title = langInfo ? langInfo.title : "Custom Learned Language";
+  const titleEl = $("#nfaLangTitle");
+  if (titleEl) titleEl.textContent = `Active Machine: ${title}`;
 
-function parseNfa(text) {
-  const out = { alphabet: [], start: 0, accepting: [], transitions: [] };
-  const num = (t) => { const n = parseInt(String(t).replace(/^q/i, ""), 10); if (Number.isNaN(n)) throw new Error(`"${t}" is not a state number`); return n; };
-  text.split("\n").forEach((raw) => {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) return;
-    let m;
-    if ((m = line.match(/^alphabet\s*:\s*(.+)$/i))) out.alphabet = m[1].split(/[\s,]+/).filter(Boolean);
-    else if ((m = line.match(/^start\s*:\s*(.+)$/i))) out.start = num(m[1].trim());
-    else if ((m = line.match(/^accept(?:ing)?\s*:\s*(.+)$/i))) out.accepting = m[1].split(/[\s,]+/).filter(Boolean).map(num);
-    else if ((m = line.match(/^(\S+)\s+(\S+)\s*(?:->|→)\s*(.+)$/))) {
-      out.transitions.push([num(m[1]), m[2], m[3].split(/[\s,]+/).filter(Boolean).map(num)]);
-    } else throw new Error(`Cannot read line: "${line}"`);
-  });
-  if (!out.alphabet.length) throw new Error("Add a line like  alphabet: 0 1");
-  return out;
+  const alpha = state.learned.dfa ? state.learned.dfa.alphabet.join(", ") : "";
+  const dfaStates = state.learned.dfa ? state.learned.dfa.states.length : 0;
+  const nfaStates = state.learned.nfa ? state.learned.nfa.states.length : 0;
+  const metaEl = $("#nfaMetaInfo");
+  if (metaEl) metaEl.textContent = `Alphabet: [ ${alpha} ] · NFA states: ${nfaStates} · DFA states: ${dfaStates}`;
+
+  renderNfaTable();
+
+  // Only render canvas graphs when tab is visible so container has non-zero width & height!
+  const nfaPanel = $("#tab-nfa");
+  if (!nfaPanel || !nfaPanel.classList.contains("active")) return;
+
+  if (state.learned.nfa_graph) {
+    nfaGraph.load(state.learned.nfa_graph, true);
+    const capNfa = $("#figNfaCaption");
+    if (capNfa) capNfa.textContent = `Figure 1. NFA: ${nfaStates} states, ${state.learned.nfa.accepting ? state.learned.nfa.accepting.length : 0} accepting.`;
+  }
+  if (state.learned.graph) {
+    nfaDfaGraph.load(state.learned.graph, false);
+    const capDfa = $("#figNfaDfaCaption");
+    if (capDfa) capDfa.textContent = `Figure 2. Equivalent Learned DFA: ${dfaStates} states.`;
+  }
 }
 
-async function runNfa() {
-  showError("#nfaError", "");
-  const btn = $("#btnNfa");
+function renderNfaTable() {
+  if (!state.learned || !state.learned.nfa) return;
+  const nfa = state.learned.nfa;
+  const table = $("#nfaTable");
+  if (!table) return;
+
+  const transMap = {};
+  nfa.transitions.forEach(([s, a, targets]) => {
+    transMap[`${s}>${a}`] = targets;
+  });
+
+  let html = `<thead><tr><th>State</th>`;
+  nfa.alphabet.forEach((a) => {
+    html += `<th>&delta;(q, ${esc(a)})</th>`;
+  });
+  html += `<th>Accepting?</th></tr></thead><tbody>`;
+
+  nfa.states.forEach((s) => {
+    const isStart = s === nfa.start;
+    const isAcc = nfa.accepting.includes(s);
+    html += `<tr><td class="mono">${isStart ? "→ " : ""}${formatStateLabel(s)}</td>`;
+    nfa.alphabet.forEach((a) => {
+      const tgts = transMap[`${s}>${a}`] || [];
+      const label = tgts.length ? `{ ${tgts.map((t) => formatStateLabel(t)).join(", ")} }` : "∅";
+      html += `<td class="mono">${label}</td>`;
+    });
+    html += `<td class="${isAcc ? "yes" : "no"}">${isAcc ? "Yes" : "No"}</td></tr>`;
+  });
+  html += `</tbody>`;
+  table.innerHTML = html;
+}
+
+async function runNfaTest() {
+  const resultEl = $("#nfaTestResult");
+  if (!resultEl) return;
+  resultEl.textContent = "";
+  if (!state.learned || !state.learned.nfa) {
+    resultEl.textContent = "Learn a DFA first on the first tab.";
+    return;
+  }
+  const str = $("#nfaTestInput").value.replace(/ε/g, "").trim();
+  const btn = $("#btnNfaTest");
   setBtnLoading(btn, true);
   try {
-    const nfa = parseNfa($("#nfaText").value);
-    nfa.test_strings = $("#nfaTests").value.split(",").map((s) => s.trim()).filter((s) => s.length).map((s) => (s === "ε" ? "" : s));
-    const r = await api("/nfa/convert", nfa);
-    nfaGraph.load(r.nfa_graph, true);
-    nfaDfaGraph.load(r.min_graph, false);
-    const capNfa = $("#figNfaCaption");
-    if (capNfa) capNfa.textContent = `Figure 2. NFA: ${r.nfa_states} states, ${r.nfa.accepting ? r.nfa.accepting.length : 0} accepting.`;
-    const capDfa = $("#figNfaDfaCaption");
-    if (capDfa) capDfa.textContent = `Figure 3. Equivalent minimal DFA: ${r.min_states} states.`;
-    $("#nfaSummary").textContent = `${r.nfa_states} NFA states became ${r.dfa_states} DFA states after subset construction, and ${r.min_states} after minimization.`;
-    const st = $("#subsetTable");
-    st.hidden = false;
-    st.innerHTML = `<tr><th>DFA state</th><th>NFA states it stands for</th>${nfa.alphabet.map((a) => `<th>on ${esc(a)}</th>`).join("")}<th>Accepting</th></tr>` +
-      r.table.map((row) => `<tr><td class="mono">d${row.id}</td><td class="mono">${esc(row.subset_label)}</td>${nfa.alphabet.map((a) => `<td class="mono">d${row.moves[a]}</td>`).join("")}<td>${row.accepting ? "yes" : "no"}</td></tr>`).join("");
-    const tt = $("#nfaTestTable");
-    tt.hidden = !r.tests.length;
-    tt.innerHTML = `<tr><th>String</th><th>NFA</th><th>Minimal DFA</th></tr>` +
-      r.tests.map((t) => `<tr><td class="mono">${esc(show(t.s))}</td><td class="${t.nfa ? "yes" : "no"}">${t.nfa ? "accepts" : "rejects"}</td><td class="${t.dfa ? "yes" : "no"}">${t.dfa ? "accepts" : "rejects"}</td></tr>`).join("");
-  } catch (e) { showError("#nfaError", e.message); }
-  finally { setBtnLoading(btn, false, "Convert to DFA"); }
+    const res = await api("/run", {
+      kind: "nfa",
+      automaton: state.learned.nfa,
+      string: str,
+      reference: state.lang === "custom" ? null : state.lang,
+    });
+    const acc = res.accepted;
+    const pathDesc = res.steps.map((st) => {
+      const sym = st.sym ? ` --(${st.sym})--> ` : "";
+      const setStr = `{ ${st.active.map((s) => "q" + toSubscript(s)).join(", ")} }`;
+      return `${sym}${setStr}`;
+    }).join("");
+
+    resultEl.innerHTML = acc
+      ? `<span class="acc" style="color:var(--accept); font-weight:700;">Accepted by NFA!</span> Active states: <code class="mono">${esc(pathDesc)}</code>`
+      : `<span class="rej" style="color:var(--reject); font-weight:700;">Rejected by NFA!</span> Active states: <code class="mono">${esc(pathDesc)}</code>`;
+  } catch (err) {
+    resultEl.textContent = "Error: " + err.message;
+  } finally {
+    setBtnLoading(btn, false, "Run on NFA");
+  }
 }
 
 let relayoutTimer = null;
@@ -824,7 +882,15 @@ function downloadDfaJson() {
 $$(".tab").forEach((t) => t.addEventListener("click", () => {
   $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
   $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + t.dataset.tab));
-  if (t.dataset.tab === "nfa" && !nfaGraph.net) runNfa();
+  if (t.dataset.tab === "nfa") {
+    setTimeout(() => {
+      renderNfaTab();
+      setTimeout(() => {
+        if (nfaGraph.net) { nfaGraph.net.redraw(); nfaGraph.net.fit(); }
+        if (nfaDfaGraph.net) { nfaDfaGraph.net.redraw(); nfaDfaGraph.net.fit(); }
+      }, 50);
+    }, 30);
+  }
   if (t.dataset.tab === "learn" && mainGraph.net) setTimeout(() => mainGraph.net.fit(), 30);
 }));
 $$("#viewSeg button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
@@ -843,9 +909,13 @@ $("#testStr").addEventListener("keydown", (e) => { if (e.key === "Enter") runTes
 $("#stepBack").addEventListener("click", () => { stopPlay(); step(-1); });
 $("#stepNext").addEventListener("click", () => { stopPlay(); step(1); });
 $("#stepPlay").addEventListener("click", togglePlay);
+$("#btnReset").addEventListener("click", resetAll);
 $("#btnExp").addEventListener("click", runExperiment);
 $("#btnCluster").addEventListener("click", runCluster);
-$("#btnNfa").addEventListener("click", runNfa);
-$("#nfaText").value = NFA_DEFAULT;
+
+const nfaTestBtn = $("#btnNfaTest");
+if (nfaTestBtn) nfaTestBtn.addEventListener("click", runNfaTest);
+const nfaInput = $("#nfaTestInput");
+if (nfaInput) nfaInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runNfaTest(); });
 
 initLanguages().catch((e) => showError("#learnError", "Could not reach the server: " + e.message));

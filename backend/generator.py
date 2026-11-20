@@ -69,6 +69,33 @@ def _third_from_end_nfa() -> NFA:
     return NFA(BIN, range(4), 0, {3}, delta)
 
 
+def _ends_with_01_nfa() -> NFA:
+    delta = {(0, "0"): {0, 1}, (0, "1"): {0}, (1, "1"): {2}}
+    return NFA(BIN, range(3), 0, {2}, delta)
+
+
+def _contains_101_nfa() -> NFA:
+    delta = {(0, "0"): {0}, (0, "1"): {0, 1},
+             (1, "0"): {2}, (2, "1"): {3},
+             (3, "0"): {3}, (3, "1"): {3}}
+    return NFA(BIN, range(4), 0, {3}, delta)
+
+
+def _no_11_nfa() -> NFA:
+    delta = {(0, "0"): {0}, (0, "1"): {1}, (1, "0"): {0}}
+    return NFA(BIN, range(2), 0, {0, 1}, delta)
+
+
+def _starts_ends_same_nfa() -> NFA:
+    ab = ["a", "b"]
+    delta = {
+        (0, "a"): {1, 2}, (0, "b"): {3, 4},
+        (1, "a"): {1, 2}, (1, "b"): {1},
+        (3, "a"): {3},    (3, "b"): {3, 4}
+    }
+    return NFA(ab, range(5), 0, {2, 4}, delta)
+
+
 # ----------------------------------------------------------------------------
 # Non-regular languages. No DFA can recognise these exactly, so they are given
 # as a membership test ("oracle") plus helpers that build hard test strings.
@@ -206,21 +233,22 @@ def shortest_disagreement(dfa: DFA, ref, max_len: int = 16) -> Optional[str]:
 
 
 PRESETS: Dict[str, dict] = {
-    "ends_with_01": {"title": "Ends with 01", "alphabet": BIN, "build": _ends_with_01,
+    "ends_with_01": {"title": "Ends with 01", "alphabet": BIN, "build": _ends_with_01, "nfa": _ends_with_01_nfa,
                      "desc": "Binary strings whose last two symbols are 0 then 1."},
     "even_zeros": {"title": "Even number of 0s", "alphabet": BIN, "build": _even_zeros,
                    "desc": "Binary strings containing an even count of 0."},
-    "contains_101": {"title": "Contains 101", "alphabet": BIN, "build": _contains_101,
+    "contains_101": {"title": "Contains 101", "alphabet": BIN, "build": _contains_101, "nfa": _contains_101_nfa,
                      "desc": "Binary strings with 101 as a substring."},
     "div_by_3": {"title": "Binary number divisible by 3", "alphabet": BIN, "build": _div_by_3,
                  "desc": "Read as a binary number, the value is a multiple of 3."},
-    "no_11": {"title": "No two consecutive 1s", "alphabet": BIN, "build": _no_11,
+    "no_11": {"title": "No two consecutive 1s", "alphabet": BIN, "build": _no_11, "nfa": _no_11_nfa,
               "desc": "Binary strings that never contain 11."},
     "third_from_end": {"title": "Third symbol from the end is 1 (NFA-friendly)", "alphabet": BIN,
                        "build": lambda: _third_from_end_nfa().to_dfa()[0], "nfa": _third_from_end_nfa,
                        "desc": "A 4-state NFA, but its smallest DFA needs 8 states."},
     "starts_ends_same": {"title": "Starts and ends with the same symbol", "alphabet": ["a", "b"],
-                         "build": _starts_ends_same, "desc": "Non-empty strings over {a,b} with equal first and last symbol."},
+                         "build": _starts_ends_same, "nfa": _starts_ends_same_nfa,
+                         "desc": "Non-empty strings over {a,b} with equal first and last symbol."},
     "abc_parity": {"title": "Even a's and odd b's", "alphabet": ["a", "b", "c"], "build": _abc_mod,
                    "desc": "Over {a,b,c}: even number of a, odd number of b, any number of c."},
     "anbn": {"title": "aⁿbⁿ (not regular)", "alphabet": ["a", "b"], "build": lambda: AnBn(),
